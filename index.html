@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src https://script.google.com https://script.googleusercontent.com https://*.googleusercontent.com; base-uri 'none'; form-action 'none'">
+<title>Recon</title>
+<style>
+html,body{margin:0;background:#0d1015;color:#e7eaef;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#boot{max-width:420px;margin:18vh auto 0;padding:24px;text-align:center}
+#boot h1{font-size:20px;margin:0 0 12px}
+#boot p{color:#909aa8;margin:0 0 14px}
+#boot button{background:#e0a33a;color:#14181e;border:0;border-radius:4px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="boot"><h1>Recon</h1><p id="boot-text">Loading&hellip;</p><p><button id="boot-retry" type="button" hidden>Try again</button></p></div>
+<noscript><p style="text-align:center;color:#909aa8">Recon needs JavaScript.</p></noscript>
+<script>
+/* Recon pilot page.
+   This file holds no intel and no secrets. It is only a doorway: everything shown after it loads comes from the recon
+   sheet's own script, at the address in API below, and only to a pilot who has logged in with EVE.
+   It is hosted outside Google on purpose. Requests made from here carry no Google sign-in, so pilots who are signed
+   into several Google accounts are no longer sent to an address that does not exist. */
+(function () {
+  'use strict';
+  var API = 'https://script.google.com/macros/s/AKfycbzIt3GKEwU0TnUPfRj6q5WSr5C1WW8ExkolXRmW3SjuHAFqs2em1AkwxbXk0epzzOunOA/exec';
+  var text = document.getElementById('boot-text'), retry = document.getElementById('boot-retry');
+
+  // never inside someone else's frame
+  if (window.top !== window.self) { text.textContent = 'Open Recon in its own tab.'; return; }
+
+  function post(q) {
+    return fetch(API, {
+      method: 'POST', body: JSON.stringify(q), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      credentials: 'omit', redirect: 'follow', referrerPolicy: 'no-referrer', cache: 'no-store'
+    }).then(function (r) {
+      if (!r.ok) throw new Error('The recon server answered with an error (' + r.status + '). Try again in a minute.');
+      return r.json();
+    }, function () {
+      throw new Error('The recon server could not be reached. Check your connection and try again.');
+    });
+  }
+
+  // Stands in for google.script.run, which the page uses to talk to the sheet:
+  //   google.script.run.withSuccessHandler(ok).withFailureHandler(bad).apiData(session)
+  function runner(ok, bad) {
+    return new Proxy({}, {
+      get: function (target, name) {
+        if (name === 'withSuccessHandler') return function (f) { return runner(f, bad); };
+        if (name === 'withFailureHandler') return function (f) { return runner(ok, f); };
+        if (typeof name !== 'string') return undefined;
+        return function () {
+          post({ op: 'call', fn: name, args: Array.prototype.slice.call(arguments) }).then(function (res) {
+            if (res && res.ok === true) return { value: res.value };
+            throw new Error(res && typeof res.error === 'string' && res.error ? res.error : 'The recon server did not answer properly. Try again.');
+          }).then(function (got) { if (ok) ok(got.value); }, function (e) { if (bad) bad(e); });
+        };
+      }
+    });
+  }
+
+  // what EVE (or a one-time link from leadership) put in the address
+  var p = {}, qs;
+  try { qs = new URLSearchParams(window.location.search); } catch (e) { qs = null; }
+  if (qs) ['code', 'state', 'connect', 'error'].forEach(function (k) { var v = qs.get(k); if (v) p[k] = String(v).slice(0, 2100); });
+  // the one-time login code does not stay in the address bar or the browser history
+  if (window.location.search || window.location.hash) {
+    try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+  }
+
+  function show(css, body) {
+    var t = document.createElement('template'), code = [];
+    t.innerHTML = css + body;
+    Array.prototype.forEach.call(t.content.querySelectorAll('script'), function (s) { code.push(s.textContent); s.parentNode.removeChild(s); });
+    Array.prototype.forEach.call(t.content.querySelectorAll('style'), function (s) { document.head.appendChild(s); });
+    window.google = { script: { run: runner(null, null) } };
+    document.body.textContent = '';
+    document.body.appendChild(t.content);
+    code.forEach(function (src) { var s = document.createElement('script'); s.textContent = src; document.body.appendChild(s); });
+  }
+
+  function boot() {
+    text.textContent = p.code ? 'Logging you in…' : 'Loading…';
+    retry.hidden = true;
+    post({ op: 'page', p: p }).then(function (res) {
+      if (!res || res.ok !== true || typeof res.body !== 'string') {
+        throw new Error(res && typeof res.error === 'string' && res.error ? res.error : 'The recon server did not answer properly.');
+      }
+      return res;
+    }).then(function (res) { show(typeof res.css === 'string' ? res.css : '', res.body); }, function (e) {
+      text.textContent = (e && e.message) || 'Something went wrong.';
+      retry.hidden = false;
+    });
+  }
+  retry.addEventListener('click', boot);
+  boot();
+})();
+</script>
+</body>
+</html>
